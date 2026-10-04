@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Relatório de Visita</title>
+<!-- Atalho na tela inicial do celular: nome curto, abre em tela cheia e ícone -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Relatório">
+<meta name="theme-color" content="#1f5fbf">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E📋%3C/text%3E%3C/svg%3E">
+
+<!-- jsPDF: biblioteca que cria o arquivo PDF (carregada da internet) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+<!-- ============ CSS: aparência da página ============ -->
+<style>
+/* Cores guardadas em variáveis; no modo escuro elas são trocadas */
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);
+--bg:#f4f5f7;--card:#fff;--tx:#1c1f24;--mut:#6b7280;--bd:#dfe2e7;--ac:#1f5fbf;--acx:#fff;--red:#c0392b}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#15171a;--card:#1f2226;--tx:#eceef1;--mut:#9aa1ab;--bd:#343940;--ac:#5b9bf0;--acx:#0d1117;--red:#ff7b6b}}
+:root[data-theme="dark"]{--bg:#15171a;--card:#1f2226;--tx:#eceef1;--mut:#9aa1ab;--bd:#343940;--ac:#5b9bf0;--acx:#0d1117;--red:#ff7b6b}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:16px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:760px;margin:0 auto;padding:16px}
+h1{font-size:20px;margin:8px 0 16px}
+section{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:16px;margin-bottom:14px}
+.th{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.th h2{margin:0}
+.novo{display:flex;gap:8px}
+.novo input{margin:0}
+h2{font-size:15px;text-transform:uppercase;letter-spacing:.05em;color:var(--ac);margin:0 0 10px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}          /* 2 colunas no cabeçalho */
+@media(max-width:560px){.grid{grid-template-columns:1fr}}            /* 1 coluna no celular */
+label.f{display:block;font-size:13px;color:var(--mut)}
+input[type=text],input[type=date],input[type=time],input[type=number]{width:100%;padding:9px 10px;margin-top:3px;border:1px solid var(--bd);border-radius:8px;background:var(--bg);color:var(--tx);font:inherit}
+.hd,.row{display:grid;grid-template-columns:26px 1fr 72px 92px 30px;gap:6px;align-items:center} /* caixa | marca | qtd | valor | ✕ */
+.hd{font-size:12px;color:var(--mut);margin-bottom:4px}
+.row{margin-bottom:7px}
+.row input{margin:0}
+.row input[type=checkbox]{width:22px;height:22px;accent-color:var(--ac)}
+.row .nm{padding:9px 0}
+.row input:disabled{opacity:.45}
+button{font:inherit;cursor:pointer;border-radius:8px;border:1px solid var(--bd);background:var(--card);color:var(--tx);padding:8px 12px}
+button.p{background:var(--ac);color:var(--acx);border-color:var(--ac);font-weight:600}
+button.x{padding:2px 6px;color:var(--mut)}
+button.perigo{background:var(--red);color:#fff;border-color:var(--red);font-weight:600}
+.big{width:100%;padding:14px;font-size:17px;margin-top:4px}
+#msg{text-align:center;color:var(--mut);font-size:14px;margin:10px 0 24px;min-height:20px}
+</style>
+</head>
+
+<!-- ============ HTML: estrutura (campos e botões) ============ -->
+<body>
+<main>
+<h1>📋 Relatório Patricia<br><small style="font-weight:400;color:var(--mut);font-size:14px">Visita de consulta de produtos nossos/concorrentes</small></h1>
+
+<section>
+<div class="grid">
+<label class="f">Data<input type="date" id="data"></label>
+<label class="f">Loja<input type="text" id="loja"></label>
+<label class="f">Filial<input type="text" id="filial"></label>
+</div>
+</section>
+
+<!-- Os 4 blocos (Espaçador, Garrafinha...) são criados pelo JavaScript aqui dentro -->
+<div id="secs"></div>
+
+<!-- Adicionar novo produto: digite o nome e toque no botão -->
+<section>
+<h2>Adicionar produto</h2>
+<div class="novo"><input type="text" id="novoProd" placeholder="Nome do produto (ex.: Máscara)"><button class="p" id="addProd">+ Adicionar</button></div>
+</section>
+
+<button class="p big" id="pdf">📄 Gerar PDF</button>
+<button class="big" id="limpar">Limpar relatório</button>
+<div id="msg"></div>
+</main>
+
+<!-- ============ JavaScript: o "cérebro" da página ============ -->
+<script>
+// Atalhos para não repetir código
+const $=id=>document.getElementById(id);                                   // pega um elemento pelo id
+const brl=n=>n.toLocaleString('pt-BR',{style:'currency',currency:'BRL'});  // 12.5 -> "R$ 12,50"
+
+// ---------- 1) DADOS ----------
+// Cada linha de marca guarda: nome (m), marcada? (on), quantidade (q), valor (v)
+const marcas=()=>[{m:'Marca Própria'},{m:'Enovamix'}].map(r=>({on:false,q:'',v:'',...r}));
+// Cada bloco guarda o nome (n) e a lista de marcas (rows). Para mudar os blocos, edite os nomes abaixo.
+const novo=()=>['Espaçador','Garrafinha','Dispositivo'].map(n=>({n,rows:marcas()}));
+let secs=novo();                  // estado atual do relatório
+$('data').valueAsDate=new Date(); // data de hoje já preenchida
+
+// ---------- 2) TELA ----------
+// Cria um campo <input> já ligado ao dado: quando você digita, o dado é atualizado
+function inp(type,val,cb,ph,extra){
+  const i=document.createElement('input');i.type=type;i.value=val;i.placeholder=ph||'';
+  if(extra)Object.assign(i,extra);
+  i.oninput=()=>cb(i.value);      // cb = função que guarda o que foi digitado
+  return i;
+}
+
+// Desenha todos os blocos na tela a partir da lista "secs"
+function draw(){
+  const box=$('secs');box.innerHTML='';
+  secs.forEach(s=>{
+    const sec=document.createElement('section');
+    sec.innerHTML='<div class="th"><h2></h2></div><div class="hd"><span></span><span>Marca</span><span>Quantidade</span><span>Valor (R$)</span><span></span></div>';
+    sec.querySelector('h2').textContent=s.n;
+    const rm=document.createElement('button');rm.className='x';rm.textContent='🗑 Remover produto';
+    rm.onclick=()=>{secs=secs.filter(z=>z!==s);draw()};     // tira o produto inteiro da lista
+    sec.querySelector('.th').append(rm);
+    s.rows.forEach((r,i)=>{
+      const d=document.createElement('div');d.className='row';
+      const cb=document.createElement('input');cb.type='checkbox';cb.checked=r.on;
+      // Marcas originais: nome fixo. Marcas adicionadas por você (ed): nome editável
+      const nm=r.ed?inp('text',r.m,v=>r.m=v,'Nome da marca'):Object.assign(document.createElement('span'),{textContent:r.m,className:'nm'});
+      const q=inp('number',r.q,v=>r.q=v,'0',{min:0,step:1,inputMode:'numeric'});
+      const v=inp('number',r.v,v=>r.v=v,'0,00',{min:0,step:.01,inputMode:'decimal'});
+      const dis=()=>{q.disabled=v.disabled=!cb.checked};   // qtd/valor só liberam se a caixa estiver marcada
+      cb.onchange=()=>{r.on=cb.checked;dis()};dis();
+      const x=document.createElement('button');x.className='x';x.textContent='✕';x.title='Remover';
+      x.onclick=()=>{s.rows.splice(i,1);draw()};           // remove a linha e redesenha
+      d.append(cb,nm,q,v,x);sec.append(d);
+    });
+    const add=document.createElement('button');add.textContent='+ Adicionar marca';
+    add.onclick=()=>{s.rows.push({m:'',on:true,q:'',v:'',ed:1});draw()};  // nova linha com nome editável
+    sec.append(add);box.append(sec);
+  });
+}
+
+// ---------- ADICIONAR PRODUTO ----------
+// Cria um novo bloco já com as duas marcas padrão (Marca Própria e Enovamix)
+function adicionaProduto(){
+  const nome=$('novoProd').value.trim();
+  if(!nome){$('novoProd').focus();return}
+  secs.push({n:nome,rows:marcas()});                        // marcas() devolve Marca Própria + Enovamix
+  $('novoProd').value='';draw();
+  $('msg').textContent='Produto "'+nome+'" adicionado ✔';
+}
+$('addProd').onclick=adicionaProduto;
+$('novoProd').onkeydown=e=>{if(e.key==='Enter')adicionaProduto()};   // Enter também adiciona
+
+// ---------- 3) BOTÃO LIMPAR ----------
+// 1º clique: pede confirmação no próprio botão. 2º clique (em até 4s): limpa tudo.
+// (Não uso confirm() porque o navegador bloqueia essa janela em páginas incorporadas.)
+let aguarda=null;
+$('limpar').onclick=()=>{
+  const b=$('limpar');
+  if(!aguarda){
+    b.textContent='⚠️ Toque de novo para confirmar';b.classList.add('perigo');
+    aguarda=setTimeout(resetaBotao,4000);                  // cancela sozinho após 4 segundos
+    return;
+  }
+  clearTimeout(aguarda);resetaBotao();
+  ['loja','filial'].forEach(k=>$(k).value=''); // esvazia o cabeçalho
+  $('data').valueAsDate=new Date();                          // data volta a ser hoje
+  secs=novo();draw();                                        // recria os blocos zerados
+  $('msg').textContent='Relatório limpo ✔';
+};
+function resetaBotao(){aguarda=null;const b=$('limpar');b.textContent='Limpar relatório';b.classList.remove('perigo')}
+
+// ---------- 4) PDF ----------
+function montarPDF(){
+  const {jsPDF}=window.jspdf;const doc=new jsPDF({unit:'mm',format:'a4'});
+  const W=210,M=16;let y=M;                                   // W = largura A4, M = margem, y = posição vertical atual
+  const need=h=>{if(y+h>285){doc.addPage();y=M}};             // nova página se faltar espaço
+  const txt=(t,x,o)=>doc.text(String(t),x,y,o);               // escreve texto na posição (x, y)
+  doc.setFont('helvetica','bold').setFontSize(16).setTextColor(30);txt('Relatório Patricia',M);y+=6;
+  doc.setFont('helvetica','normal').setFontSize(10).setTextColor(100);txt('Visita de consulta de produtos nossos/concorrentes',M);y+=9;doc.setTextColor(30);
+  const dt=$('data').value?$('data').value.split('-').reverse().join('/'):'-';   // 2026-10-04 -> 04/10/2026
+  const info=[['Data',dt,'Loja',$('loja').value||'-'],['Filial',$('filial').value||'-','','']];
+  info.forEach(a=>{doc.setFontSize(11);doc.setFont('helvetica','bold');txt(a[0]?a[0]+':':'',M);txt(a[2]?a[2]+':':'',W/2);
+    doc.setFont('helvetica','normal');txt(a[1],M+28);txt(a[3],W/2+16);y+=6});
+  y+=2;
+  secs.forEach(s=>{                                           // um bloco por vez
+    need(30);y+=4;doc.setFont('helvetica','bold').setFontSize(12).setTextColor(31,95,191);txt(s.n.toUpperCase(),M);y+=2;
+    doc.setDrawColor(200).line(M,y,W-M,y);y+=6;doc.setTextColor(30);
+    doc.setFontSize(10);txt('Marca',M+8);txt('Quantidade',W-M-40,{align:'right'});txt('Valor',W-M,{align:'right'});y+=5.5;
+    doc.setFont('helvetica','normal').setFontSize(11);
+    s.rows.forEach(r=>{need(7);
+      doc.setDrawColor(60).rect(M,y-3.6,4,4);                 // quadradinho da caixa de seleção
+      if(r.on){doc.setLineWidth(.5).line(M+.8,y-1.6,M+1.8,y-.4).line(M+1.8,y-.4,M+3.4,y-3);doc.setLineWidth(.2)} // desenha o "✓"
+      txt(r.m||'-',M+8);
+      if(r.on){const q=r.q===''?'-':r.q,v=r.v===''?'-':brl(parseFloat(r.v)||0);txt(q,W-M-40,{align:'right'});txt(v,W-M,{align:'right'})}
+      y+=6});
+  });
+  return doc;
+}
+
+// Botão "Gerar PDF": monta o PDF e entrega para download
+$('pdf').onclick=async()=>{
+  const msg=$('msg');msg.textContent='Gerando PDF...';
+  if(!window.jspdf){msg.textContent='Erro: a biblioteca de PDF (jsPDF) não carregou. Verifique a internet e recarregue a página.';return}
+  let doc;
+  try{doc=montarPDF()}catch(e){msg.textContent='Erro ao montar o PDF: '+(e&&e.message||e);return}
+  const loja=($('loja').value.trim()||'visita').replace(/[^\w\-À-ÿ ]+/g,'').replace(/\s+/g,'-');
+  const nome='Relatorio-'+loja+'-'+($('data').value||'')+'.pdf';
+  const blob=doc.output('blob');
+  try{
+    let dl=null;
+    try{dl=window.claude?await claude.use('downloads'):null}catch(_){}   // recurso de download do Claude
+    if(dl){
+      await dl.save({filename:nome,data:blob});                         // abre a confirmação de download
+      msg.textContent='PDF gerado ✔';
+    }else if(location.protocol==='file:'){
+      doc.save(nome);                                                    // arquivo aberto direto no computador/celular: download normal
+      msg.textContent='PDF gerado ✔';
+    }else{
+      // Página publicada sem o recurso de download: o navegador bloqueia downloads diretos.
+      // Tenta o menu de compartilhar do celular; se não existir, avisa em vez de abrir página bloqueada.
+      const f=new File([blob],nome,{type:'application/pdf'});
+      if(navigator.canShare&&navigator.canShare({files:[f]})){
+        await navigator.share({files:[f],title:nome});
+        msg.textContent='PDF enviado para o menu de compartilhar ✔';
+      }else{
+        msg.textContent='Download não disponível neste modo de acesso. Baixe o arquivo HTML da página e abra no navegador para gerar o PDF.';
+      }
+    }
+  }catch(e){
+    msg.textContent=e&&e.code==='declined'?'Download cancelado.':'Erro no download ['+(e&&e.code||'?')+']: '+(e&&e.message||e);
+  }
+};
+
+draw();   // desenha a tela pela primeira vez
+</script>
+</body>
+</html>
